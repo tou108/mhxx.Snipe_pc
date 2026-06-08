@@ -1,1 +1,195 @@
+name: Build Release
 
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  # ─────────────────────────────────────────────────────────────
+  # Windows — EXE (PyInstaller onefile)
+  # ─────────────────────────────────────────────────────────────
+  build-windows:
+    name: Build Windows EXE
+    runs-on: windows-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build EXE
+        run: |
+          pyinstaller `
+            --onefile `
+            --name mhxx_snipe_pc `
+            --add-data "assets;assets" `
+            --hidden-import flask `
+            --hidden-import flask_cors `
+            --hidden-import bt_linux `
+            --hidden-import bt_stub `
+            --hidden-import macro_manager `
+            --collect-all flask `
+            --noconfirm `
+            main.py
+
+      - name: Package artifacts
+        run: |
+          mkdir release
+          copy dist\mhxx_snipe_pc.exe release\
+          copy BLUETOOTH_SETUP.md release\
+          copy README.md release\
+          copy setup_windows.bat release\
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mhxx_snipe_pc-windows
+          path: release/
+
+  # ─────────────────────────────────────────────────────────────
+  # Linux — 単体バイナリ
+  # ─────────────────────────────────────────────────────────────
+  build-linux:
+    name: Build Linux binary
+    runs-on: ubuntu-22.04
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install system dependencies
+        run: |
+          sudo apt-get update -qq
+          sudo apt-get install -y --no-install-recommends \
+            bluetooth bluez bluez-tools libglib2.0-dev
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build binary
+        run: |
+          pyinstaller \
+            --onefile \
+            --name mhxx_snipe_pc \
+            --add-data "assets:assets" \
+            --hidden-import flask \
+            --hidden-import flask_cors \
+            --hidden-import bt_linux \
+            --hidden-import bt_stub \
+            --hidden-import macro_manager \
+            --collect-all flask \
+            --noconfirm \
+            main.py
+
+      - name: Package artifacts
+        run: |
+          mkdir release
+          cp dist/mhxx_snipe_pc release/
+          cp BLUETOOTH_SETUP.md README.md setup_linux.sh release/
+          chmod +x release/mhxx_snipe_pc release/setup_linux.sh
+          cd release && tar czf ../mhxx_snipe_pc-linux.tar.gz .
+
+      - name: Upload Linux artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mhxx_snipe_pc-linux
+          path: mhxx_snipe_pc-linux.tar.gz
+
+  # ─────────────────────────────────────────────────────────────
+  # macOS — バイナリ
+  # ─────────────────────────────────────────────────────────────
+  build-macos:
+    name: Build macOS binary
+    runs-on: macos-14
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install Python dependencies
+        run: |
+          pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pyinstaller
+
+      - name: Build binary
+        run: |
+          pyinstaller \
+            --onefile \
+            --name mhxx_snipe_pc \
+            --add-data "assets:assets" \
+            --hidden-import flask \
+            --hidden-import flask_cors \
+            --hidden-import bt_linux \
+            --hidden-import bt_stub \
+            --hidden-import macro_manager \
+            --collect-all flask \
+            --noconfirm \
+            main.py
+
+      - name: Package artifacts
+        run: |
+          mkdir release
+          cp dist/mhxx_snipe_pc release/
+          cp BLUETOOTH_SETUP.md README.md release/
+          chmod +x release/mhxx_snipe_pc
+          cd release && tar czf ../mhxx_snipe_pc-macos.tar.gz .
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: mhxx_snipe_pc-macos
+          path: mhxx_snipe_pc-macos.tar.gz
+
+  # ─────────────────────────────────────────────────────────────
+  # GitHub Release (tag push 時のみ)
+  # ─────────────────────────────────────────────────────────────
+  release:
+    name: Create GitHub Release
+    needs: [build-windows, build-linux, build-macos]
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          merge-multiple: true
+          path: artifacts/
+
+      - name: List artifacts
+        run: ls -la artifacts/
+
+      - name: Create Release
+        uses: softprops/action-gh-release@v2
+        with:
+          name: MHXX スナイプ PC版 ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          generate_release_notes: true
+          files: |
+            artifacts/**/*.exe
+            artifacts/**/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
